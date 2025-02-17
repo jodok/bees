@@ -78,7 +78,6 @@ def main(argv):
         latest_ts = int(latest[0].timestamp()) if latest else 0
         current_ts = int(datetime.now(timezone.utc).timestamp())
         limit = max(int((current_ts - latest_ts) / 86.4), 100)  # 1000 records per day
-        print(f"Getting {limit} records for {hive_id}")
 
         history_response = requests.get(
             f"{BASE_URL}/api/hives/{hive_id}/history?limit={limit}&reverse=true&attributes={ATTRIBUTES}",
