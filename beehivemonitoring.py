@@ -1,11 +1,20 @@
+import json
 import os
 import sys
 import requests
+from datetime import datetime, timezone
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    ForeignKey,
+)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timezone
 
 
 load_dotenv()
@@ -15,16 +24,19 @@ ATTRIBUTES = "weight;pressure;pressureGw;pressureEnv;inTotal;outTotal;magX;magY;
 HEADERS = {"X-Auth-Token": os.getenv("BEEHIVE_API_TOKEN")}
 DB_CONNECTION = os.getenv("DATABASE_URL", "postgresql://localhost/bees")
 
+APIARIES = os.getenv("APIARIES")
+APIARIES = json.loads(APIARIES)
+
 
 def main(argv):
     # Create SQLAlchemy engine for PostgreSQL
     engine = create_engine(DB_CONNECTION)
     Base = declarative_base()
 
-    class Hive(Base):
-        __tablename__ = "hives"
+    class Apiary(Base):
+        __tablename__ = "apiary"
 
-        hive_id = Column(Integer, primary_key=True)
+        id = Column(Integer, primary_key=True)
         name = Column(String)
         created_at = Column(DateTime, default=datetime.now(timezone.utc))
         updated_at = Column(
@@ -33,10 +45,23 @@ def main(argv):
             onupdate=datetime.now(timezone.utc),
         )
 
-    class HiveHistory(Base):
-        __tablename__ = "hive_history"
+    class Hive(Base):
+        __tablename__ = "hive"
 
-        hive_id = Column(Integer, primary_key=True)
+        id = Column(Integer, primary_key=True)
+        name = Column(String)
+        apiary_id = Column(Integer, ForeignKey("apiary.id"))
+        created_at = Column(DateTime, default=datetime.now(timezone.utc))
+        updated_at = Column(
+            DateTime,
+            default=datetime.now(timezone.utc),
+            onupdate=datetime.now(timezone.utc),
+        )
+
+    class History(Base):
+        __tablename__ = "history"
+
+        hive_id = Column(Integer, ForeignKey("hive.id"), primary_key=True)
         time = Column(DateTime, primary_key=True)
         # Dynamically create columns from ATTRIBUTES
         for attr in ATTRIBUTES.split(";"):
@@ -55,12 +80,27 @@ def main(argv):
     Session = sessionmaker(bind=engine)
     session = Session()
 
+    for apiary in APIARIES:
+        apiary_id = apiary["id"]
+        apiary_name = apiary["name"]
+        apiary = Apiary(id=apiary_id, name=apiary_name)
+        try:
+            session.merge(apiary)
+            session.commit()
+        except Exception as e:
+            print(f"Error upserting apiary: {e}")
+            session.rollback()
+
     hives = {}
     hives_response = requests.get(f"{BASE_URL}/api/hives", headers=HEADERS)
     for hive in hives_response.json():
         hive_id = hive["id"]
-        hives[hive_id] = {"name": hive["name"], "raw": hive, "history": {}}
-        hive = Hive(hive_id=hive_id, name=hive["name"])
+        hive_name = hive["name"]
+        apiary_id = next(
+            apiary["id"] for apiary in APIARIES if hive_id in apiary["hives"]
+        )
+        hives[hive_id] = {"name": hive_name, "raw": hive, "history": {}}
+        hive = Hive(id=hive_id, name=hive_name, apiary_id=apiary_id)
         try:
             session.merge(hive)
             session.commit()
@@ -70,9 +110,9 @@ def main(argv):
 
         # determine how many records to fetch
         latest = (
-            session.query(HiveHistory.time)
-            .filter(HiveHistory.hive_id == hive_id)
-            .order_by(HiveHistory.time.desc())
+            session.query(History.time)
+            .filter(History.hive_id == hive_id)
+            .order_by(History.time.desc())
             .first()
         )
         latest_ts = int(latest[0].timestamp()) if latest else 0
@@ -87,9 +127,7 @@ def main(argv):
         for m in history_response.json():
             t = m.pop("time")
             dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
-            reading = HiveHistory(
-                hive_id=hive_id, time=dt, **{k: v for k, v in m.items()}
-            )
+            reading = History(hive_id=hive_id, time=dt, **{k: v for k, v in m.items()})
             try:
                 session.merge(reading)
                 session.commit()
