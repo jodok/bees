@@ -37,7 +37,7 @@ def main(argv):
         __tablename__ = "apiary"
 
         id = Column(Integer, primary_key=True)
-        name = Column(String)
+        name = Column(String, unique=True, nullable=False)
         created_at = Column(DateTime, default=datetime.now(timezone.utc))
         updated_at = Column(
             DateTime,
@@ -49,7 +49,7 @@ def main(argv):
         __tablename__ = "hive"
 
         id = Column(Integer, primary_key=True)
-        name = Column(String)
+        name = Column(String, unique=True, nullable=False)
         apiary_id = Column(Integer, ForeignKey("apiary.id"))
         created_at = Column(DateTime, default=datetime.now(timezone.utc))
         updated_at = Column(
