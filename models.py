@@ -11,9 +11,9 @@ class Apiary(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         default=datetime.now(timezone.utc),
         onupdate=datetime.now(timezone.utc),
     )
@@ -25,9 +25,9 @@ class Hive(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, nullable=False)
     apiary_id = Column(Integer, ForeignKey("apiary.id"))
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         default=datetime.now(timezone.utc),
         onupdate=datetime.now(timezone.utc),
     )
@@ -37,10 +37,10 @@ class History(Base):
     __tablename__ = "history"
 
     hive_id = Column(Integer, ForeignKey("hive.id"), primary_key=True)
-    time = Column(DateTime, primary_key=True)
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    time = Column(DateTime(timezone=True), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         default=datetime.now(timezone.utc),
         onupdate=datetime.now(timezone.utc),
     )
