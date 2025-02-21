@@ -33,7 +33,8 @@ def close_session():
 def migrate():
     """Drop all tables and recreate them with the new schema."""
     print("Dropping all tables...")
-    Base.metadata.drop_all(engine)
+    # Drop all tables with cascade enabled
+    Base.metadata.drop_all(engine, checkfirst=True)
 
     print("Creating tables with new schema...")
     Base.metadata.create_all(engine)

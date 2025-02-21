@@ -1,8 +1,16 @@
 import sys
 import requests
 from datetime import datetime, timezone
-from settings import BASE_URL, HEADERS, APIARIES, HIVES, SENSORS, ATTRIBUTES
-from models import Apiary, Hive, Sensor, History
+from settings import (
+    BASE_URL,
+    HEADERS,
+    APIARIES,
+    HIVES,
+    SENSORS,
+    ATTRIBUTES,
+    ASSIGNMENTS,
+)
+from models import Apiary, Hive, Sensor, History, SensorAssignment
 from database import init_db, get_session, close_session
 
 
@@ -16,14 +24,37 @@ def upsert_defaults(session):
                 Hive(id=hive["id"], name=hive["name"], apiary_id=hive["apiary_id"])
             )
         for sensor in SENSORS:
+            # Create or update sensor
             session.merge(
                 Sensor(
                     id=sensor["id"],
                     name=sensor["name"],
                     modules=sensor["modules"],
-                    hive_id=sensor["hive_id"],
                 )
             )
+
+            # Check if this sensor has any assignment (past or present)
+            has_assignment = (
+                session.query(SensorAssignment)
+                .filter(SensorAssignment.sensor_id == sensor["id"])
+                .first()
+            )
+
+            # Only set a default assignment if the sensor has never been assigned
+            if not has_assignment:
+                # Find a matching default assignment if one exists
+                default_assignment = next(
+                    (a for a in ASSIGNMENTS if a["sensor_id"] == sensor["id"]), None
+                )
+                if default_assignment:
+                    session.add(
+                        SensorAssignment(
+                            sensor_id=default_assignment["sensor_id"],
+                            hive_id=default_assignment["hive_id"],
+                            start_time=datetime.fromtimestamp(0, tz=timezone.utc),
+                        )
+                    )
+
         session.commit()
     except Exception as e:
         print(f"Error upserting defaults: {e}")
