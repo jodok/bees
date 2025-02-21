@@ -1,25 +1,37 @@
 import sys
 import requests
 from datetime import datetime, timezone
-from settings import BASE_URL, HEADERS, APIARIES, ATTRIBUTES
-from models import Apiary, Hive, History
+from settings import BASE_URL, HEADERS, APIARIES, HIVES, SENSORS, ATTRIBUTES
+from models import Apiary, Hive, Sensor, History
 from database import init_db, get_session, close_session
 
 
-def upsert_apiaries(session):
-    """Update or insert apiaries from configuration."""
-    for apiary in APIARIES:
-        apiary_obj = Apiary(id=apiary["id"], name=apiary["name"])
-        try:
-            session.merge(apiary_obj)
-            session.commit()
-        except Exception as e:
-            print(f"Error upserting apiary: {e}")
-            session.rollback()
+def upsert_defaults(session):
+    """Update or insert default data from configuration."""
+    try:
+        for apiary in APIARIES:
+            session.merge(Apiary(id=apiary["id"], name=apiary["name"]))
+        for hive in HIVES:
+            session.merge(
+                Hive(id=hive["id"], name=hive["name"], apiary_id=hive["apiary_id"])
+            )
+        for sensor in SENSORS:
+            session.merge(
+                Sensor(
+                    id=sensor["id"],
+                    name=sensor["name"],
+                    modules=sensor["modules"],
+                    hive_id=sensor["hive_id"],
+                )
+            )
+        session.commit()
+    except Exception as e:
+        print(f"Error upserting defaults: {e}")
+        session.rollback()
 
 
-def get_hive_list():
-    """Fetch list of hives from the API."""
+def get_sensor_list():
+    """Fetch list of sensors from the API."""
     response = requests.get(f"{BASE_URL}/api/hives", headers=HEADERS)
     return response.json()
 
@@ -29,28 +41,27 @@ def get_apiary_id_for_hive(hive_id):
     return next(apiary["id"] for apiary in APIARIES if hive_id in apiary["hives"])
 
 
-def upsert_hive(session, hive_data):
-    """Update or insert a hive and return its data."""
-    hive_id = hive_data["id"]
-    hive_name = hive_data["name"]
-    apiary_id = get_apiary_id_for_hive(hive_id)
-
-    hive = Hive(id=hive_id, name=hive_name, apiary_id=apiary_id)
+def upsert_sensor(session, sensor_id, sensor_data):
+    """Update or insert a sensor and return its data."""
+    sensor = session.get(Sensor, sensor_id)
+    if sensor:
+        sensor.name = sensor_data["name"]
+        sensor.raw = sensor_data
+    else:
+        sensor = Sensor(id=sensor_id, name=sensor_data["name"], raw=sensor_data)
     try:
-        session.merge(hive)
+        session.merge(sensor)
         session.commit()
     except Exception as e:
-        print(f"Error upserting hive: {e}")
+        print(f"Error upserting sensor: {e}")
         session.rollback()
 
-    return {"name": hive_name, "raw": hive_data, "history": {}}
 
-
-def get_history_limit(session, hive_id):
+def get_history_limit(session, sensor_id):
     """Calculate how many history records to fetch."""
     latest = (
         session.query(History.time)
-        .filter(History.hive_id == hive_id)
+        .filter(History.sensor_id == sensor_id)
         .order_by(History.time.desc())
         .first()
     )
@@ -59,27 +70,23 @@ def get_history_limit(session, hive_id):
     return max(int((current_ts - latest_ts) / 86.4), 100)  # 1000 records per day
 
 
-def fetch_hive_history(hive_id, limit):
-    """Fetch history data for a hive from the API."""
+def fetch_sensor_history(sensor_id, limit):
+    """Fetch history data for a sensor from the API."""
     response = requests.get(
-        f"{BASE_URL}/api/hives/{hive_id}/history?limit={limit}&reverse=true&attributes={ATTRIBUTES}",
+        f"{BASE_URL}/api/hives/{sensor_id}/history?limit={limit}&reverse=true&attributes={ATTRIBUTES}",
         headers=HEADERS,
     )
     return response.json()
 
 
-def upsert_history_reading(session, hive_id, measurement):
-    """Update or insert a history reading."""
-    time = measurement.pop("time")
-    dt = datetime.fromtimestamp(time / 1000, tz=timezone.utc)
-    reading = History(
-        hive_id=hive_id, time=dt, **{k: v for k, v in measurement.items()}
-    )
+def upsert_history_readings(session, readings):
+    """Update or insert multiple history readings in a batch."""
     try:
-        session.merge(reading)
+        for reading in readings:
+            session.merge(reading)
         session.commit()
     except Exception as e:
-        print(f"Error upserting reading: {e}")
+        print(f"Error upserting readings batch: {e}")
         session.rollback()
 
 
@@ -89,21 +96,29 @@ def main(argv):
     session = get_session()
 
     try:
-        # Update apiaries
-        upsert_apiaries(session)
+        # Set defaults
+        upsert_defaults(session)
 
-        # Process hives
-        hives = {}
-        for hive_data in get_hive_list():
-            hive_id = hive_data["id"]
-            hives[hive_id] = upsert_hive(session, hive_data)
+        for sensor_data in get_sensor_list():
+            sensor_id = sensor_data["id"]
+            upsert_sensor(session, sensor_id, sensor_data)
 
             # Fetch and process history
-            limit = get_history_limit(session, hive_id)
-            history_data = fetch_hive_history(hive_id, limit)
+            limit = get_history_limit(session, sensor_id)
+            history_data = fetch_sensor_history(sensor_id, limit)
 
+            # Prepare batch of readings
+            readings = []
             for measurement in history_data:
-                upsert_history_reading(session, hive_id, measurement)
+                time = measurement.pop("time")
+                reading = History(
+                    sensor_id=sensor_id,
+                    time=datetime.fromtimestamp(time / 1000, tz=timezone.utc),
+                    **{k: v for k, v in measurement.items()},
+                )
+                readings.append(reading)
+
+            upsert_history_readings(session, readings)
 
     finally:
         close_session()

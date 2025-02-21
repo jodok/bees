@@ -11,9 +11,15 @@ HEADERS = {"X-Auth-Token": os.getenv("BEEHIVE_API_TOKEN")}
 # Database Configuration
 DB_CONNECTION = os.getenv("DATABASE_URL", "postgresql://localhost/bees")
 
-# Apiary Configuration
-APIARIES = os.getenv("APIARIES")
-APIARIES = json.loads(APIARIES)
+# Default configurations
+DEFAULT_APIARIES = '[{"id":1,"name":"My Apiary"}]'
+DEFAULT_HIVES = '[{"id":1,"name":"Hive 1","apiary_id":1}]'
+DEFAULT_SENSORS = '[{"id":1,"name":"Sensor 1","modules":["weight"],"hive_id":1}]'
+
+# Load configurations from environment or use defaults
+APIARIES = json.loads(os.getenv("APIARIES", DEFAULT_APIARIES))
+HIVES = json.loads(os.getenv("HIVES", DEFAULT_HIVES))
+SENSORS = json.loads(os.getenv("SENSORS", DEFAULT_SENSORS))
 
 # Monitoring Attributes
 ATTRIBUTES = (

@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=bees
+      - POSTGRES_USER=bees
+      - POSTGRES_PASSWORD=bees
+      - DB_HOST=docker.for.mac.host.internal
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./data/grafana:/var/lib/grafana

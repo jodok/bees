@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, Text, ARRAY, JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from settings import ATTRIBUTES
 
@@ -10,42 +11,42 @@ class Apiary(Base):
     __tablename__ = "apiary"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
-    )
+    name = Column(Text, unique=True, nullable=False)
 
 
 class Hive(Base):
     __tablename__ = "hive"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
+    name = Column(Text, unique=True, nullable=False)
     apiary_id = Column(Integer, ForeignKey("apiary.id"))
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
-    )
+
+
+class Sensor(Base):
+    __tablename__ = "sensor"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(Text, unique=True, nullable=False)
+    modules = Column(ARRAY(Text))
+    hive_id = Column(Integer, ForeignKey("hive.id"))
+    raw = Column(JSONB)
 
 
 class History(Base):
     __tablename__ = "history"
 
-    hive_id = Column(Integer, ForeignKey("hive.id"), primary_key=True)
+    sensor_id = Column(Integer, ForeignKey("sensor.id"), primary_key=True)
     time = Column(DateTime(timezone=True), primary_key=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
-    )
+    # Dynamically create columns from ATTRIBUTES
+    for attr in ATTRIBUTES.split(";"):
+        locals()[attr] = Column(Float)
 
 
-# Dynamically create columns from ATTRIBUTES
-for attr in ATTRIBUTES.split(";"):
-    setattr(History, attr, Column(Float))
+class Event(Base):
+    __tablename__ = "event"
+
+    id = Column(Integer, primary_key=True)
+    time = Column(DateTime(timezone=True))
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    title = Column(Text, nullable=False)
+    tags = Column(ARRAY(Text), nullable=True)

@@ -28,3 +28,19 @@ def get_session():
 def close_session():
     """Remove the current session."""
     Session.remove()
+
+
+def migrate():
+    """Drop all tables and recreate them with the new schema."""
+    print("Dropping all tables...")
+    Base.metadata.drop_all(engine)
+
+    print("Creating tables with new schema...")
+    Base.metadata.create_all(engine)
+
+    print("Migration completed successfully!")
+
+
+if __name__ == "__main__":
+    # This allows running migrations directly by executing this file
+    migrate()
