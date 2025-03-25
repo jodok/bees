@@ -2,9 +2,47 @@ import requests
 import time
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from beehivemonitoring import HiveHistory
+from models import History
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
+import argparse
+import logging
+from filelock import FileLock, Timeout
+from beep_sensors import (
+    HIVES,
+    DEVICES,
+    SENSORS_HEART,
+    SENSORS_SCALE,
+)
+from database import get_session, close_session
+import atexit
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+# If running in cron (no TTY), set to WARNING level
+if not os.isatty(0):
+    logging.getLogger().setLevel(logging.WARNING)
+
+# Lockfile mechanism
+LOCK_FILE = "/tmp/beep.lock"
+lock = FileLock(
+    LOCK_FILE, timeout=0
+)  # timeout=0 means it will fail immediately if lock exists
+
+try:
+    lock.acquire()
+except Timeout:
+    # If we can't acquire the lock, another instance is running
+    if os.isatty(0):  # Only log if running in terminal
+        logging.warning("Another instance is already running. Exiting.")
+    exit(0)
+
+# Register cleanup function to release lock on exit
+atexit.register(lock.release)
 
 load_dotenv()
 
@@ -12,9 +50,14 @@ load_dotenv()
 BASE_URL = "https://api.beep.nl"
 HEADERS = {"Authorization": f"Bearer {os.getenv('BEEP_API_TOKEN')}"}
 
+# Beehivemonitor -> Beep
 HIVE_MAP = {
-    30522: "ypx0zaf9wcfdsecm",  # Rossstall 001
-    30523: "3sa5ug7nzyrphvrn",  # Rossstall 002
+    30522: 66651,  # Beute 1
+    30523: 66652,  # Beute 2
+    30602: 66653,  # Beute 3
+    30603: 66654,  # Beute 4
+    30604: 66699,  # Beute 5
+    30605: 66700,  # Beute 6
 }
 
 FREQUENCY_BANDS = {
@@ -44,84 +87,156 @@ def get_bhm_hive_id(beep_hive_id):
     return None
 
 
-# Create SQLAlchemy engine and session
-engine = create_engine("postgresql://localhost/bees")
-Session = sessionmaker(bind=engine)
-session = Session()
+def rate_limit_aware_request(method, url, **kwargs):
+    """
+    Helper function to make rate-limited requests to the BEEP API.
+    Handles rate limiting by checking response headers and waiting when necessary.
+    """
+    while True:
+        response = requests.request(method, url, **kwargs)
 
-bhm_id = 30522
-measurements = []
+        remaining = int(response.headers.get("X-RateLimit-Remaining", 0))
+        limit = int(response.headers.get("X-RateLimit-Limit", 60))
 
-# Scale
-# Query measurements for hive 30522 where weight is not null
-key = "ypx0zaf9wcfdsecm"
-stmt = (
-    select(HiveHistory)
-    .where(HiveHistory.hive_id == bhm_id, HiveHistory.weight.isnot(None))
-    .order_by(HiveHistory.time.desc())
-)
-results = session.execute(stmt).scalars().all()
+        if remaining < limit * 0.1:  # If less than 10% remaining
+            sleep_time = 60  # Default to 60 seconds if no reset header
+            if "X-RateLimit-Reset" in response.headers:
+                reset_time = int(response.headers["X-RateLimit-Reset"])
+                sleep_time = max(1, reset_time - int(time.time()))
+            logging.info(f"Rate limit low. Waiting {sleep_time} seconds...")
+            time.sleep(sleep_time)
+        else:
+            return response
 
-for r in results:
-    frequency_band = None
-    for (lower, upper), band_name in FREQUENCY_BANDS.items():
-        if r.frequency and lower <= r.frequency < upper:
-            frequency_band = band_name
-            break
 
-    data = {
-        "key": key,
-        "time": r.time.timestamp(),
-        "w_v": r.weight,
-        "t": r.tempOut,
-        "h": r.humidityOut,
-        "bv": r.vbatOut,
-        "rssi": r.rssiOut,
-        "p": r.pressure,
-    }
-    measurements.append(data)
+def setup_devices():
+    for device in DEVICES:
+        device["type"] = "other"
+        res = rate_limit_aware_request(
+            "POST", f"{BASE_URL}/api/devices", headers=HEADERS, json=device
+        )
+        logging.info(f"Device setup: {res.status_code} {res.text}")
 
-# Hiveheart
-# Query measurements for hive 30522 where tempIn is not null
-key = "f0bdcettzyyryegl"
-stmt = (
-    select(HiveHistory)
-    .where(HiveHistory.hive_id == bhm_id, HiveHistory.tempIn.isnot(None))
-    .order_by(HiveHistory.time.desc())
-)
-results = session.execute(stmt).scalars().all()
 
-for r in results:
-    frequency_band = None
-    for (lower, upper), band_name in FREQUENCY_BANDS.items():
-        if r.frequency and lower <= r.frequency < upper:
-            frequency_band = band_name
-            break
+def setup_sensors():
+    for device in DEVICES:
+        if device["type"] == "heart":
+            sensors = SENSORS_HEART
+        elif device["type"] == "scale":
+            sensors = SENSORS_SCALE
+        else:
+            continue
 
-    data = {
-        "key": key,
-        "time": r.time.timestamp(),
-        "t_i": r.tempIn,
-        "h_i": r.humidityIn,
-        "bv": r.vbatIn,
-        "rssi": r.rssiIn,
-        "frequency_band": frequency_band,
-    }
-    measurements.append(data)
+        for sensor in sensors:
+            sensor["device_id"] = device["id"]
+            res = rate_limit_aware_request(
+                "POST", f"{BASE_URL}/api/sensordefinition", headers=HEADERS, json=sensor
+            )
+            logging.info(f"Sensor setup: {res.status_code} {res.text}")
 
-for data in measurements:
-    res = requests.post(
-        f"{BASE_URL}/api/sensors?key={data.pop('key')}", headers=HEADERS, json=data
+
+def sync_measurements():
+    # Get database session
+    session = get_session()
+
+    try:
+        for hive in HIVES:
+            res = rate_limit_aware_request(
+                "GET",
+                f"{BASE_URL}/api/sensors/lastvalues",
+                headers=HEADERS,
+                params={"hive_id": hive["id"]},
+            )
+            if res.status_code != 200:
+                last = datetime.now() - timedelta(days=1)
+            else:
+                last = res.json()["time"]  # "2025-02-14T01:35:04Z"
+                last = datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ")
+
+            bhm_id = get_bhm_hive_id(hive["id"])
+            measurements = []
+
+            # Scales
+            for device in DEVICES:
+                res = rate_limit_aware_request(
+                    "GET", f"{BASE_URL}/api/devices/{device['id']}", headers=HEADERS
+                )
+                if res.status_code != 200:
+                    logging.error(f"Device {device['id']} not found")
+                    continue
+                # needed to send measurement
+                key = res.json()["key"]
+
+                # Query all measurements for the hive that have either weight or tempIn data
+                stmt = (
+                    select(History)
+                    .where(
+                        History.sensor_id == bhm_id,
+                        History.time > last - timedelta(minutes=15),
+                    )
+                    .order_by(History.time.desc())
+                )
+                results = session.execute(stmt).scalars().all()
+
+                for r in results:
+                    frequency_band = None
+                    for (lower, upper), band_name in FREQUENCY_BANDS.items():
+                        if r.frequency and lower <= r.frequency < upper:
+                            frequency_band = band_name
+                            break
+
+                    # Determine if this is a scale or heart measurement based on available data
+                    if r.weight is not None:
+                        data = {
+                            "key": key,
+                            "time": r.time.timestamp(),
+                            "w_v": r.weight,
+                            "t": r.tempOut,
+                            "h": r.humidityOut,
+                            "bv": r.vbatOut,
+                            "rssi": r.rssiOut,
+                            "p": r.pressure,
+                        }
+                    elif r.tempIn is not None:
+                        data = {
+                            "key": key,
+                            "time": r.time.timestamp(),
+                            "t_i": r.tempIn,
+                            "h_i": r.humidityIn,
+                            "bv": r.vbatIn,
+                            "rssi": r.rssiIn,
+                            "frequency_band": frequency_band,
+                        }
+                    else:
+                        logging.error(f"Unknown measurement type for {r.sensor_id}")
+                        continue
+                    measurements.append(data)
+
+            for data in measurements:
+                res = rate_limit_aware_request(
+                    "POST",
+                    f"{BASE_URL}/api/sensors?key={data.pop('key')}",
+                    headers=HEADERS,
+                    json=data,
+                )
+                logging.info(f"{data} -> {res.status_code} {res.text}")
+    finally:
+        close_session()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="BEEP API interaction tool")
+    parser.add_argument(
+        "action",
+        choices=["setup", "sync"],
+        default="sync",
+        nargs="?",
+        help="Action to perform: setup (devices and sensors) or sync (measurements)",
     )
-    print(f"{data} -> {res.status_code} {res.text}")
-    remaining = int(res.headers.get("X-RateLimit-Remaining", 0))
-    limit = int(res.headers.get("X-RateLimit-Limit", 60))
-    if remaining < limit * 0.1:  # If less than 10% remaining
-        sleep_time = 60  # Default to 60 seconds if no reset header
-        if "X-RateLimit-Reset" in res.headers:
-            reset_time = int(res.headers["X-RateLimit-Reset"])
-            sleep_time = max(1, reset_time - int(time.time()))
-        time.sleep(sleep_time)
+    args = parser.parse_args()
 
-
-session.close()
+    if args.action == "setup":
+        setup_devices()
+        setup_sensors()
+    else:  # sync is default
+        sync_measurements()
