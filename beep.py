@@ -208,7 +208,9 @@ def sync_measurements():
                             "frequency_band": frequency_band,
                         }
                     else:
-                        logging.error(f"Unknown measurement type for {r.sensor_id}")
+                        logging.error(
+                            f"Unknown measurement type for {r.sensor_id}, {r}"
+                        )
                         continue
                     measurements.append(data)
 
