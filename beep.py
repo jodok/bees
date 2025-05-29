@@ -213,21 +213,23 @@ def sync_measurements():
                         measurement_details = {
                             "sensor_id": r.sensor_id,
                             "time": r.time,
-                            "available_attributes": {
+                            "device_type": device["type"],
+                            "all_attributes": {
                                 attr: getattr(r, attr, None)
-                                for attr in [
-                                    "weight",
-                                    "tempIn",
-                                    "tempOut",
-                                    "humidityIn",
-                                    "humidityOut",
-                                    "pressure",
-                                    "frequency",
-                                ]
+                                for attr in dir(r)
+                                if not attr.startswith("_")  # Skip private attributes
+                                and not callable(getattr(r, attr))  # Skip methods
+                                and attr
+                                not in [
+                                    "metadata",
+                                    "query",
+                                    "query_class",
+                                ]  # Skip SQLAlchemy internals
                             },
                         }
                         logging.error(
                             f"Unknown measurement type for sensor {r.sensor_id}. "
+                            f"Device type: {device['type']}. "
                             f"Measurement details: {json.dumps(measurement_details, default=str)}"
                         )
                         continue
