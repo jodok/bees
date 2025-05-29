@@ -12,6 +12,7 @@ from settings import (
 )
 from models import Apiary, Hive, Sensor, History, SensorAssignment
 from database import init_db, get_session, close_session
+import logging
 
 
 def upsert_defaults(session):
@@ -63,8 +64,27 @@ def upsert_defaults(session):
 
 def get_sensor_list():
     """Fetch list of sensors from the API."""
-    response = requests.get(f"{BASE_URL}/api/hives", headers=HEADERS)
-    return response.json()
+    try:
+        response = requests.get(f"{BASE_URL}/api/hives", headers=HEADERS)
+        response.raise_for_status()  # Raise an exception for bad status codes
+
+        if not response.text.strip():
+            logging.error("Received empty response from API")
+            return []
+
+        try:
+            return response.json()
+        except requests.exceptions.JSONDecodeError as e:
+            logging.error(f"Failed to decode JSON response: {e}")
+            logging.error(f"Response status code: {response.status_code}")
+            logging.error(
+                f"Response content: {response.text[:500]}"
+            )  # Log first 500 chars
+            return []
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"API request failed: {e}")
+        return []
 
 
 def get_apiary_id_for_hive(hive_id):

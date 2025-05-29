@@ -17,6 +17,7 @@ from beep_sensors import (
 )
 from database import get_session, close_session
 import atexit
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -208,8 +209,26 @@ def sync_measurements():
                             "frequency_band": frequency_band,
                         }
                     else:
+                        # Enhanced error logging with measurement details
+                        measurement_details = {
+                            "sensor_id": r.sensor_id,
+                            "time": r.time,
+                            "available_attributes": {
+                                attr: getattr(r, attr, None)
+                                for attr in [
+                                    "weight",
+                                    "tempIn",
+                                    "tempOut",
+                                    "humidityIn",
+                                    "humidityOut",
+                                    "pressure",
+                                    "frequency",
+                                ]
+                            },
+                        }
                         logging.error(
-                            f"Unknown measurement type for {r.sensor_id}, {r}"
+                            f"Unknown measurement type for sensor {r.sensor_id}. "
+                            f"Measurement details: {json.dumps(measurement_details, default=str)}"
                         )
                         continue
                     measurements.append(data)
