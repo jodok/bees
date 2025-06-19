@@ -208,6 +208,9 @@ def sync_measurements():
                             "rssi": r.rssiIn,
                             "frequency_band": frequency_band,
                         }
+                    elif (r.rssiGw is not None) and (r.pressureGw is not None):
+                        # ignore gateway measurements
+                        continue
                     else:
                         # Enhanced error logging with measurement details
                         measurement_details = {
