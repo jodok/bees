@@ -24,9 +24,22 @@ ASSIGNMENTS = json.loads(os.getenv("ASSIGNMENTS", DEFAULT_ASSIGNMENTS))
 
 # Monitoring Attributes
 ATTRIBUTES = (
-    "weight;pressure;pressureGw;pressureEnv;inTotal;outTotal;magX;magY;magZ;"
-    "accX;accY;accZ;tempIn;tempOut;tempEnv;humidityIn;humidityOut;humidityEnv;"
-    "humiditySh1;humiditySh2;humiditySh3;frequency;amplitude;vbatIn;vbatOut;"
-    "vbatEnv;vbatGw;vbatMap;rssiIn;rssiOut;rssiEnv;rssiGw;rssiMap;co2;tvoc;"
-    "co;o2;o3;so;no;so2;pm25;pm10"
+    "weight;"
+    "pressure;pressureGw;pressureEnv;"
+    "inCounts;outCounts;inTotal;outTotal;"
+    "magX;magY;magZ;accX;accY;accZ;"
+    "tempIn;tempOut;tempEnv;"
+    "humidityIn;humidityOut;humidityEnv;humiditySh1;humiditySh2;humiditySh3;"
+    "frequency;amplitude;"
+    "vbatIn;vbatOut;vbatEnv;vbatGw;vbatMap;"
+    "rssiIn;rssiOut;rssiEnv;rssiGw;rssiMap;"
+    "co2;tvoc;co;o2;o3;so;no;so2;pm25;pm10;"
+    "fftPeak;fft"
 )
+
+# Attribute Type Definitions
+# Define which attributes should be stored as arrays (ARRAY)
+ARRAY_ATTRIBUTES = {"inCounts", "outCounts", "fft"}
+
+# Define which attributes should be stored as integers
+INTEGER_ATTRIBUTES = {"inTotal", "outTotal", "rssiIn", "rssiOut", "rssiGw", "fftPeak"}

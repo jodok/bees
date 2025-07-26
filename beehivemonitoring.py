@@ -8,6 +8,8 @@ from settings import (
     HIVES,
     SENSORS,
     ATTRIBUTES,
+    ARRAY_ATTRIBUTES,
+    INTEGER_ATTRIBUTES,
     ASSIGNMENTS,
 )
 from models import Apiary, Hive, Sensor, History, SensorAssignment
@@ -162,10 +164,53 @@ def main(argv):
             readings = []
             for measurement in history_data:
                 time = measurement.pop("time")
+
+                # Process measurement data to handle arrays vs scalars
+                processed_data = {}
+                for k, v in measurement.items():
+                    if k in ARRAY_ATTRIBUTES:
+                        # Store arrays as ARRAY(Integer)
+                        if isinstance(v, list):
+                            # Convert all elements to integers
+                            try:
+                                processed_data[k] = [int(x) for x in v]
+                            except (ValueError, TypeError):
+                                # Skip invalid arrays
+                                continue
+                        elif v is not None:
+                            # Convert single value to array
+                            try:
+                                processed_data[k] = [int(v)]
+                            except (ValueError, TypeError):
+                                # Skip invalid values
+                                continue
+                        else:
+                            processed_data[k] = None
+                    elif k in INTEGER_ATTRIBUTES:
+                        # Store as Integer
+                        if v is not None:
+                            try:
+                                processed_data[k] = int(v)
+                            except (ValueError, TypeError):
+                                # Skip invalid values
+                                continue
+                        else:
+                            processed_data[k] = None
+                    else:
+                        # Store scalars as Float
+                        if v is not None:
+                            try:
+                                processed_data[k] = float(v)
+                            except (ValueError, TypeError):
+                                # Skip invalid values
+                                continue
+                        else:
+                            processed_data[k] = None
+
                 reading = History(
                     sensor_id=sensor_id,
                     time=datetime.fromtimestamp(time / 1000, tz=timezone.utc),
-                    **{k: v for k, v in measurement.items()},
+                    **processed_data,
                 )
                 readings.append(reading)
 

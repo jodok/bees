@@ -3,7 +3,7 @@ from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, Text, ARRAY
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from settings import ATTRIBUTES
+from settings import ATTRIBUTES, ARRAY_ATTRIBUTES, INTEGER_ATTRIBUTES
 
 Base = declarative_base()
 
@@ -67,9 +67,15 @@ class History(Base):
     )
     time = Column(DateTime(timezone=True), primary_key=True)
     sensor = relationship("Sensor", back_populates="history")
+
     # Dynamically create columns from ATTRIBUTES
     for attr in ATTRIBUTES.split(";"):
-        locals()[attr] = Column(Float)
+        if attr in ARRAY_ATTRIBUTES:
+            locals()[attr] = Column(ARRAY(Integer))
+        elif attr in INTEGER_ATTRIBUTES:
+            locals()[attr] = Column(Integer)
+        else:
+            locals()[attr] = Column(Float)
 
 
 class Event(Base):
